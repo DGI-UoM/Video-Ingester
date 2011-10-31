@@ -107,7 +107,7 @@ def connectToFedora(url, user, pw):
     return f
 
 """ ====== MANAGING FEDORA OBJECTS ====== """
-
+# the default contentmodel here should be that of the video files
 def addObjectToFedora(fedora, myLabel, myPid=None, parentPid="islandora:top", contentModel="islandora:collectionCModel"):
     # check for invalid parentPid, invalid contentModel
     # create the fedora object
