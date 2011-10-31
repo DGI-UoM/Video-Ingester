@@ -14,6 +14,10 @@ class MODSFile:
     }
 
     def __init__(self):
+        """
+        maybe parameterize the version?  that could cause problems, we'll have to check the version
+        before adding certain elements so we don't add invalid tags/attributes
+        """
         self.root = etree.Element('mods', { "version" : "3.0", "{%s}schemaLocation" % self.XSI : self.SCHEMA_NS }, nsmap=self.NSMap)
 
     def addTitle(self, title, subtitle=None, type=None):
@@ -125,7 +129,8 @@ class MODSFile:
         @placeCode The marccountry code
         @publisher The publisher's name
         @date The date this object was issued
-        @issuance **fill me in**
+        @issuance Valid values are "continuing", "monographic", "single unit", "multipart monograph",
+                  "serial", "integrating resource"
         @note origin info can have multiple dates attached (may be limited to 1,2,3)
         @note It look like most of the fields can also be left out - need to support this
         """
@@ -208,6 +213,15 @@ class MODSFile:
 
     def addAbstract(self, abstract):
         etree.SubElement(self.root, "abstract").text = abstract
+        return self
+
+    def addAccessCondition(self, condition, type):
+        """
+        Add an access condition to this object
+        @param condition The condition text to add
+        @param type The type of access condition.  Valid values are "restriction on access" and "use and reproduction"
+        """
+        etree.SubElement(self.root, "accessCondition", { "type" : type }).text = condition
         return self
 
     def writeToFile(self, file):
