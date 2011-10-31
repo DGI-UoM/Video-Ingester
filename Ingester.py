@@ -91,6 +91,11 @@ def loadConfigFile(configFile):
     return data
 
 def connectToFedora(url, user, pw):
+    """
+    Attempt to create a connection to fedora using the supplied username and password.  If the
+    connection succeeds, return the connected fedora client, otherwise return None.  The calling
+    function should terminate if None is received.
+    """
     try:
         connection = Connection(url, username=user, password=pw)
     except Exception, ex:
@@ -107,6 +112,7 @@ def connectToFedora(url, user, pw):
     return f
 
 """ ====== MANAGING FEDORA OBJECTS ====== """
+
 # the default contentmodel here should be that of the video files
 def addObjectToFedora(fedora, myLabel, myPid=None, parentPid="islandora:top", contentModel="islandora:collectionCModel"):
     # check for invalid parentPid, invalid contentModel
