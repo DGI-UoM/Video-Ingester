@@ -62,7 +62,9 @@ class DualWriter:
 
 def loadConfigFile(configFile):
     """
-    This function get all the configuration values for use by the script
+    This function get all the configuration values for use by the script.  The values are all packed
+    up into a dictionary instead of just floating free - should probably create a struct to hold all
+    this data maybe?  Something that's not as hackable as a dictionary
     """
     # prep the config file for input
     cfgp = ConfigParser.RawConfigParser(defaults={}, allow_no_value=False)
