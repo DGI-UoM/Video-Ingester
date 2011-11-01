@@ -41,10 +41,9 @@ def csv2mods(csvFilename, outDir=None):
             elif "extent" in k:
                 continue
             elif "identifier" in k:
-                path = os.path.join(outDir, "mods", "")
-                if not os.path.isdir(path):
-                    os.mkdir(path)
-                fileName = os.path.join(path, value + os.extsep + "xml")
+                if not os.path.isdir(outDir):
+                    os.mkdir(outDir)
+                fileName = os.path.join(outDor, value + os.extsep + "xml")
                 mods.addIdentifier(value)
             elif "temporal" in k:
                 mods.addSubject([], [value], [])

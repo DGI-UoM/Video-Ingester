@@ -32,33 +32,14 @@ from islandoraUtils.metadata import fedora_relationships # for RELS-EXT stuff
 from fcrepo.connection import Connection, FedoraConnectionException
 from fcrepo.client import FedoraClient
 from csvtomods import csv2mods
+from DualWriter import DualWriter
+import pdb
 
 # a couple of constants - should be moved into config dictionary
 LOG_FILE_NAME = "Ingester"
 config = { "cfgFile" : "controller.cfg",
            "saveFile" : "IngesterState.save"
          }
-
-class DualWriter:
-    """
-    A simple class designed to take anything written to sys.stdout and fork it to a file
-    """
-    def __init__(self, stdout, filename, filemode='a'):
-        self.savedOut = sys.stdout
-        self.stdout = stdout
-        self.logfile = file(filename, filemode)
-    def write(self, text):
-        self.stdout.write(text)
-        self.logfile.write(text)
-    def close(self):
-        self.stdout.close()
-        self.logfile.close()
-    def flush(self):
-        self.stdout.flush()
-        self.logfile.flush()
-    def close(self):
-        sys.stdout = self.savedOut # not sure if this is right
-        self.logfile.close()
 
 def loadConfigFile(configFile):
     """
@@ -67,7 +48,7 @@ def loadConfigFile(configFile):
     this data maybe?  Something that's not as hackable as a dictionary
     """
     # prep the config file for input
-    cfgp = ConfigParser.RawConfigParser(defaults={}, allow_no_value=False)
+    cfgp = ConfigParser.SafeConfigParser(defaults={}, allow_no_value=False)
     cfgp.read(configFile)
 
     try:
@@ -78,9 +59,9 @@ def loadConfigFile(configFile):
                  "solrUrl" : cfgp.get("Solr", "url"),
                  "inDir" : os.path.expanduser(cfgp.get("Controller", "input_dir")),
                  "outDir" : os.path.expanduser(cfgp.get("Controller", "output_dir")),
-                 "fileTypes" : cfgp.get("Controller", "file_types").split(","),
                  "hostCollectionName" : unicode(cfgp.get("Controller", "host_collection_name")),
                  "hostCollectionPid" : unicode(cfgp.get("Controller", "host_collection_pid")),
+                 "datastreams" : cfgp.get("Controller", "datastreams").split(","),
                  "files" : cfgp.options("Files")
                }
     except ConfigParser.NoSectionError, nsx:
@@ -115,21 +96,47 @@ def connectToFedora(url, user, pw):
 
 """ ====== MANAGING FEDORA OBJECTS ====== """
 
-# the default contentmodel here should be that of the video files
-def addObjectToFedora(fedora, myLabel, myPid=None, parentPid="islandora:top", contentModel="islandora:collectionCModel"):
+def addCollectionToFedora(fedora, myLabel, myPid, parentPid="islandora:top", contentModel="islandora:collectionCModel"):
+    # put in the collection object
+    collection_policy = u'<collection_policy xmlns="http://www.islandora.ca" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="" xsi:schemaLocation="http://www.islandora.ca http://syn.lib.umanitoba.ca/collection_policy.xsd"><content_models><content_model dsid="ISLANDORACM" name="Book Content Model" namespace="islandora:1" pid="islandora:bookCModel"></content_model></content_models><search_terms></search_terms><staging_area></staging_area><relationship>isMemberOf</relationship></collection_policy>'
+    try:
+        collection_object = fedora.getObject(myPid)
+        print("Attempted to create already existing object %s" % myPid)
+        return collection_object
+    except FedoraConnectionException, fcx:
+        if not fcx.httpcode in [404]:
+            raise fcx
+
+    collection_object = fedora.createObject(collection_pid, label=collection_label)
+
+    # collection policy
+    try:
+        collection_object.addDataStream(u'COLLECTION_POLICY', collection_policy, label=u'COLLECTION_POLICY',
+        mimeType=u'text/xml', controlGroup=u'X', # X=inline xml
+        logMessage=u'Added basic COLLECTION_POLICY data.')
+        print('Added COLLECTION_POLICY datastream to:' + collection_pid)
+    except FedoraConnectionException:
+        print('Error in adding COLLECTION_POLICY datastream to:' + collection_pid + '\n')
+
+    #add relationships
+    collection_object_RELS_EXT=fedora_relationships.rels_ext(collection_object, [fedora_relationships.rels_namespace('fedora-model', 'info:fedora/fedora-system:def/model#')])
+    collection_object_RELS_EXT.addRelationship('isMemberOfCollection', 'islandora:top')
+    collection_object_RELS_EXT.addRelationship(fedora_relationships.rels_predicate('fedora-model', 'hasModel'), 'islandora:collectionCModel')
+    collection_object_RELS_EXT.update()
+    # everything is scriptographically correct here, but check the object/rels-ext
+    return collection_object
+
+def addObjectToFedora(fedora, myLabel, myPid, parentPid, contentModel):
     # check for invalid parentPid, invalid contentModel
     # create the fedora object
-    if myPid:
-        # validate the pid
-        try:
-            obj = fedora.getObject(myPid)
-            print ("Attempted to create already existing object %s" % myPid)
-            return obj
-        except FedoraConnectionException, fcx:
-            if fcx.httpcode not in [404]:
-                raise fcx
-    else:
-        myPid = fedora.getNextPID(config["fedoraNS"])
+    # validate the pid
+    try:
+        obj = fedora.getObject(myPid)
+        print("Attempted to create already existing object %s" % myPid)
+        return obj
+    except FedoraConnectionException, fcx:
+        if fcx.httpcode not in [404]:
+            raise fcx
 
     print("Fedora object %s does not exit - create it" % myPid)
     #myLabel = unicode(os.path.basename(os.path.dirname(modsFilePath)))
@@ -148,9 +155,9 @@ def addObjectToFedora(fedora, myLabel, myPid=None, parentPid="islandora:top", co
         except FedoraConnectionException as fedoraEXL:
             if str(fedoraEXL.body).find("is currently being modified by another thread") != -1:
                 loop = True
-                print("Trouble (thread lock) updating obj RELS-EXT: " + myPid + " retrying.")
+                print("Trouble (thread lock) updating obj(%s) RELS-EXT - retrying." % myPid)
             else:
-                print("Error updating obj RELS-EXT: " + myPid)
+                print("Error updating obj(%s) RELS-EXT" % myPid)
 
     """
     #add the book pid to modsFile
@@ -175,6 +182,20 @@ def addObjectToFedora(fedora, myLabel, myPid=None, parentPid="islandora:top", co
     sendToSolr()
     """
     return obj
+
+def parseModsFolder(fedora, folder):
+    # first make sure folder is a valid folder
+    if not os.path.isdir(folder):
+        return 0
+
+    count = 0
+    for file in os.listdir(folder):
+        fileName, fileExt = os.path.splitext(os.path.basename(file))
+        if fileExt in [ ".xml" ]:
+            # found a mods file
+            # the filename is the name of the object
+            pass
+    return count
 
 # try to handle an abrupt shutdown more cleanly
 def shutdown_handler(signum, frame):
@@ -205,10 +226,11 @@ def writeSaveHeader(saveFile):
     cfgp.add_section("Solr")
     cfgp.set("Solr", "url", config["solrUrl"])
     cfgp.add_section("Controller")
-    cfgp.set("Controller", "inputDir", config["inDir"])
-    cfgp.set("Controller", "outputDir", config["outDir"])
+    cfgp.set("Controller", "input_dir", config["inDir"])
+    cfgp.set("Controller", "output_dir", config["outDir"])
     cfgp.set("Controller", "host_collection_name", config["hostCollectionName"])
     cfgp.set("Controller", "host_collection_pid", config["hostCollectionPid"])
+    cfgp.set("Controller", "datastreams", ",".join(config["datastreams"]))
     cfgp.add_section("Files")
     # just the section header so no values(files) are written here
     cfgp.write(fp)
@@ -229,16 +251,8 @@ def printConfigSettings():
     print("outputDir = %s" % config["outDir"])
     print("host_collection_name = %s" % config["hostCollectionName"])
     print("host_collection_pid = %s" % config["hostCollectionPid"])
+    print("datastreams = %s" % str(config["datastreams"]))
     print("======================================================")
-
-def ingestFromModsFile(fedora, modsFile, inDir, outDir, fileList):
-    if not os.path.isdir(outDir):
-        os.mkdir(outDir)
-
-    #add collection object to fedora
-    #addObjectToFedora(fedora, "", parentPid)
-    fileList.remove(file)
-    return True
 
 """ ====== M A I N ====== """
 def main(argv):
@@ -302,7 +316,7 @@ def main(argv):
 
     """ ====== LOGGER ====== """
     # internal log file
-    logFile = os.path.join(logDir, LOG_FILE_NAME + "-" + time.strftime("%y-%m-%d_%H:%M:%S") + ".log")
+    logFile = os.path.join(logDir, "%s-%s.log" % (LOG_FILE_NAME, time.strftime("%y-%m-%d_%H:%M:%S")))
     sys.stdout = DualWriter(sys.stdout, logFile)
     print("logger ready")
 
@@ -335,7 +349,7 @@ def main(argv):
     print("Create host collection object (pid=%s)" % config["hostCollectionPid"])
     collection = addObjectToFedora(fedora, config["hostCollectionPid"], myPid=config["hostCollectionPid"], parentPid="islandora:top")
 
-    print("+-Searching for items to ingest")
+    print("+-Searching for collections to ingest")
     print(" -Root folder = %s" % config["inDir"])
     print(" -Subfolders = %s" % str(sourceDirList))
 
@@ -345,13 +359,19 @@ def main(argv):
         # outDir is a mirror of the folder structure inside sourceDir
         outDir = os.path.join(config["outDir"], dir)
 
-        print(" +-Searching folder: " + inDir)
-        #loop through those files checking for a marc binary
-        modsFile = ""
+        print(" +-Searching folder: %s" % inDir)
+        dsfolders = []
+
         fileList = os.listdir(inDir)
         for file in fileList:
-            if os.path.isdir(os.path.join(inDir, file)):
-                print("  -Skipping directory %s" % file)
+            fullDirectory = os.path.join(inDir, file)
+            if fullDirectory:
+                # check for datastream source
+                if file in config["datastreams"]:
+                    print("  -Found a datastream source folder: %s" % file)
+                    dsfolders.append(fullDirectory)
+                else:
+                    print("  -Skipping directory %s" % file)
                 continue
             if file[0] == ".":
                 print("  -Skipping file %s" % file)
@@ -360,25 +380,18 @@ def main(argv):
             if fileExt in [ ".log" ]:
                 print("  -Skipping log file %s" % file)
                 continue
+            # check for the "index" file
             if fileExt == ".csv":
                 # launch csv2mods
                 print("  -Found index(csv) file %s" % file)
                 if not os.path.isdir(outDir):
                     os.makedirs(outDir, 0755) # makedirs is a more extensive version of mkdir - it will create the entire tree if neccessary
                 csv2mods(os.path.join(inDir, file), outDir)
+                # now os.path.join(outDir, "mods") contains my mods files
+                parseModsFolder(fedora, outDir, dsfolders)
                 continue
-            # check for the "definition file"
-            elif fileExt == ".xml":
-                modsFile = file
-                print("  -Found MODS file %s" % modsFile)
-                ingestFromModsFile(fedora, modsFile, inDir, outDir, fileList)
-                break
             else:
                 print("  -Found unclassified File: %s" % file)
-
-        # if there was more than one, we only use the first one found
-        if modsFile:
-            ingestFromModsFiles(fedora, modsFile)
 
     sys.stdout.close()
     return 0
