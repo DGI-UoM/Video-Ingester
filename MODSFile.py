@@ -19,6 +19,7 @@ class MODSFile:
         before adding certain elements so we don't add invalid tags/attributes
         """
         self.root = etree.Element('mods', { "version" : "3.0", "{%s}schemaLocation" % self.XSI : self.SCHEMA_NS }, nsmap=self.NSMap)
+        self.originInfo = None
 
     def addTitle(self, title, subtitle=None, type=None):
         """
@@ -223,6 +224,46 @@ class MODSFile:
         """
         etree.SubElement(self.root, "accessCondition", { "type" : type }).text = condition
         return self
+
+    def _checkOriginInfo(self):
+        if not self.originInfo():
+            self.originInfo = etree.SubElement(self.root, "originInfo")
+
+    # origin info
+    def addOriginInfoPlaceByName(self, placeName):
+        self.checkOriginInfo()
+        child = etree.SubElement(self.originInfo, "place")
+        etree.SubElement(child, "placeTerm", { "type" : "text" }).text = placeName
+        code = marccountries.findCodeByCountry(placeName)
+        if code:
+            child = etree.SubElement(self.originInfo, "place")
+            etree.SubElement(child, "placeTerm", { "authority" : "marccountry", "type" : "code" }).text = code
+        return self.originInfo
+
+    def addOriginInfoPlaceByCode(self, placeCode):
+        self.checkOriginInfo()
+        child = etree.SubElement(self.originInfo, "place")
+        etree.SubElement(child, "placeTerm", { "authority": "marccountry", "type" : "code" }).text = placeCode
+        country = marccountries.findCountryByCode(placeCode)
+        if country:
+            child = etree.SubElement(self.originInfo, "place")
+            etree.SubElement(child, "placeTerm", { "type" : "text" }).text = country
+        return self.originInfo
+
+    def addOriginInfoPublisher(self, publisher):
+        self.checkOriginInfo()
+        etree.SubElement(self.originInfo, "publisher").text = publisher
+        return self.originInfo
+
+    def addOriginInfoDateIssued(self, date, encoding="marc"):
+        self.checkOriginInfo()
+        etree.SubElement(self.originInfo, "dateIssued", { "encoding" : encoding }).text = date
+        return self.originInfo
+
+    def addOriginInfoIssuance(self, issuance):
+        self.checkOriginInfo()
+        etree.SubElement(self.originInfo, "issuance").text = issuance
+        return self.originInfo
 
     def writeToFile(self, file):
         """

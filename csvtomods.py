@@ -4,11 +4,13 @@ from MODSFile import MODSFile
 #import pdb
 
 def csv2mods(csvFilename, outDir=None):
-    reader = csv.reader(open(csvFilename, "rb"), delimiter=",", quotechar='"')
 
-    if not outDir:
+    if outDir and os.path.isdir(outDir):
+        pathbase = outDir
+    else:
         pathbase = os.path.split(os.path.realpath(csvFilename))[0]
 
+    reader = csv.reader(open(csvFilename, "rb"), delimiter=",", quotechar='"')
     headers = reader.next()
 
     for row in reader:
@@ -43,7 +45,7 @@ def csv2mods(csvFilename, outDir=None):
             elif "identifier" in k:
                 if not os.path.isdir(outDir):
                     os.mkdir(outDir)
-                fileName = os.path.join(outDor, value + os.extsep + "xml")
+                fileName = os.path.join(pathbase, value + os.extsep + "xml")
                 mods.addIdentifier(value)
             elif "temporal" in k:
                 mods.addSubject([], [value], [])

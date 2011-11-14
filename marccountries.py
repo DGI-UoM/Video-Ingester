@@ -1,5 +1,7 @@
 #!/usr/local/bin/python
 # coding: utf-8
+
+# a list of marc country codes for various countries, provinces, and territories
 countries = {
 "aa" : "Albania",
 "abc" : "Alberta",
