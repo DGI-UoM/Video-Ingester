@@ -2,20 +2,17 @@
 Created on Oct. 12 2011
 
 @author: Jason MacWilliams
-@dependencies: lxml
 
 @TODO: email integration:waiting on server
 """
 
-import os
+import os, sys
 import ConfigParser
 
-"""
 class ConfigData:
     def __init__(self):
-        self.LOG_FILE_NAME = "Ingester"
         self.cfgFile = "controller.cfg"
-        self.saveFile = 'IngesterState.save"
+        self.saveFile = "IngesterState.save"
         self.fedoraUrl = None
         self.fedoraNS = None
         self.fedoraUser = None
@@ -27,101 +24,94 @@ class ConfigData:
         self.hostCollectionPid = None
         self.datastreams = []
         self.files = {}
-"""
 
-# a couple of constants - should be moved into config dictionary
-config = { "cfgFile" : "controller.cfg",
-           "logFile" : "Ingester",
-           "saveFile" : "IngesterState.save"
-         }
+    def parse(self, configFile):
+        self.cfgFile = configFile
+        # prep the config file for input
+        if sys.version_info >= (2, 7):
+            cfgp = ConfigParser.SafeConfigParser(allow_no_value=True)
+        else:
+            cfgp = ConfigParser.SafeConfigParser()
+        cfgp.read(configFile)
 
-def loadConfigFile(configFile):
-    """
-    This function get all the configuration values for use by the script.  The values are all packed
-    up into a dictionary instead of just floating free - should probably create a struct to hold all
-    this data maybe?  Something that's not as hackable as a dictionary
-    """
-    # prep the config file for input
-    cfgp = ConfigParser.SafeConfigParser(defaults={}, allow_no_value=False)
-    cfgp.read(configFile)
+        try:
+            self.fedoraUrl = cfgp.get("Fedora", "url")
+            self.fedoraNS = unicode(cfgp.get("Fedora", "namespace"))
+            self.fedoraUser = cfgp.get("Fedora", "username")
+            self.fedoraPW = cfgp.get("Fedora", "password")
+            self.hostCollectionName = unicode(cfgp.get("Fedora", "host_collection_name"))
+            self.hostCollectionPid = unicode(cfgp.get("Fedora", "host_collection_pid"))
+            self.aggregateName = unicode(cfgp.get("Fedora", "aggregate_name"))
+            self.aggregatePid = unicode(cfgp.get("Fedora", "aggregate_pid"))
+            self.solrUrl = cfgp.get("Solr", "url")
+            self.inDir = os.path.expanduser(cfgp.get("Controller", "input_dir"))
+            self.outDir = os.path.expanduser(cfgp.get("Controller", "output_dir"))
+            self.mailTo = cfgp.get("Controller", "mail_to").replace(",", " ")
+            self.datastreams = cfgp.get("Controller", "datastreams").split(",")
+            self.files = cfgp.options("Files")
+        except ConfigParser.NoSectionError, nsx:
+            print "Error while parsing config file: %s" % nsx
+            return False
+        except ConfigParser.NoOptionError, nox:
+            print "Error while parsing config file: %s" % nox
+            return False
+        return True
 
-    try:
-        data = { "fedoraUrl" : cfgp.get("Fedora", "url"),
-                 "fedoraNS" : unicode(cfgp.get("Fedora", "namespace")),
-                 "fedoraUser" : cfgp.get("Fedora", "username"),
-                 "fedoraPW" : cfgp.get("Fedora", "password"),
-                 "solrUrl" : cfgp.get("Solr", "url"),
-                 "inDir" : os.path.expanduser(cfgp.get("Controller", "input_dir")),
-                 "outDir" : os.path.expanduser(cfgp.get("Controller", "output_dir")),
-                 "mailTo" : cfgp.get("Controller", "mail_to").replace(",", " "),
-                 "aggregateName" : unicode(cfgp.get("Controller", "aggregate_name")),
-                 "aggregatePid" : unicode(cfgp.get("Controller", "aggregate_pid")),
-                 "hostCollectionName" : unicode(cfgp.get("Controller", "host_collection_name")),
-                 "hostCollectionPid" : unicode(cfgp.get("Controller", "host_collection_pid")),
-                 "datastreams" : cfgp.get("Controller", "datastreams").split(","),
-                 "files" : cfgp.options("Files")
-               }
-    except ConfigParser.NoSectionError, nsx:
-        print "Error while parsing config file: %s" % nsx
-        return None
-    except ConfigParser.NoOptionError, nox:
-        print "Error while parsing config file: %s" % nox
-        return None
+    def writeSaveHeader(self, saveFile):
+        fp = open(saveFile, "w")
+        # prep the config file for input
+        if sys.version_info >= (2, 7):
+            cfgp = ConfigParser.SafeConfigParser(allow_no_value=True)
+        else:
+            cfgp = ConfigParser.SafeConfigParser()
 
-    return data
+        cfgp.add_section("Fedora")
+        cfgp.set("Fedora", "url", self.fedoraUrl)
+        cfgp.set("Fedora", "namespace", self.fedoraNS)
+        cfgp.set("Fedora", "username", self.fedoraUser)
+        cfgp.set("Fedora", "password", self.fedoraPW)
+        cfgp.set("Fedora", "host_collection_name", self.hostCollectionName)
+        cfgp.set("Fedora", "host_collection_pid", self.hostCollectionPid)
+        cfgp.set("Fedora", "aggregate_name", self.aggregateName)
+        cfgp.set("Fedora", "aggregate_pid", self.aggregatePid)
+        cfgp.add_section("Solr")
+        cfgp.set("Solr", "url", self.solrUrl)
+        cfgp.add_section("Controller")
+        cfgp.set("Controller", "input_dir", self.inDir)
+        cfgp.set("Controller", "output_dir", self.outDir)
+        cfgp.set("Controller", "mail_to", self.mailTo.replace(" ", ","))
+        cfgp.set("Controller", "datastreams", ",".join(self.datastreams))
+        cfgp.add_section("Files")
+        # just the section header so no values(files) are written here
+        cfgp.write(fp)
+        fp.close()
 
-""" ====== SAVING AND LOADING SCRIPT STATES ====== """
+    # write a record to the script save state
+    def writeSaveRecord(self, saveFile, record):
+        self.files.append(record)
+        file = open(saveFile, 'a')
+        file.write(record + '\n')
+        file.flush()
+        file.close()
+        # close after every write so if the script stops (for any reason), the save state will be intact
 
-# write a record to the script save state
-def writeSaveRecord(saveFile, record):
-    file = open(saveFile, 'a')
-    file.write(record + '\n')
-    file.flush()
-    file.close()
-    # close after every write so if the script stops (for any reason), the save state will be intact
-
-def writeSaveHeader(saveFile):
-    fp = open(saveFile, "w")
-    # prep the config file for input
-    cfgp = ConfigParser.SafeConfigParser(defaults={}, allow_no_value=True)
-    cfgp.add_section("Fedora")
-    cfgp.set("Fedora", "url", config["fedoraUrl"])
-    cfgp.set("Fedora", "namespace", config["fedoraNS"])
-    cfgp.set("Fedora", "username", config["fedoraUser"])
-    cfgp.set("Fedora", "password", config["fedoraPW"])
-    cfgp.add_section("Solr")
-    cfgp.set("Solr", "url", config["solrUrl"])
-    cfgp.add_section("Controller")
-    cfgp.set("Controller", "input_dir", config["inDir"])
-    cfgp.set("Controller", "output_dir", config["outDir"])
-    cfgp.set("Sontroller", "mail_to", config["mailTo"].replace(" ", ","))
-    cfgp.set("Controller", "aggregate_name", config["aggregateName"])
-    cfgp.set("Controller", "aggregate_pid", config["aggregatePid"])
-    cfgp.set("Controller", "host_collection_name", config["hostCollectionName"])
-    cfgp.set("Controller", "host_collection_pid", config["hostCollectionPid"])
-    cfgp.set("Controller", "datastreams", ",".join(config["datastreams"]))
-    cfgp.add_section("Files")
-    # just the section header so no values(files) are written here
-    cfgp.write(fp)
-    fp.close()
-
-def printConfigSettings():
-    print("======================================================")
-    print("=== Configuration data ===")
-    print("\n[Fedora]")
-    print("url = %s" % config["fedoraUrl"])
-    print("namespace = %s" % config["fedoraNS"])
-    print("username = %s" % config["fedoraUser"])
-    print("password = %s" % config["fedoraPW"])
-    print("\n[Solr]")
-    print("url = %s" % config["solrUrl"])
-    print("\n[Controller]")
-    print("input_dir = %s" % config["inDir"])
-    print("output_dir = %s" % config["outDir"])
-    print("mail_to = %s" % config["mailTo"])
-    print("aggregate_name = %s" % config["aggregateName"])
-    print("aggregate_pid = %s" % config["aggregatePid"])
-    print("host_collection_name = %s" % config["hostCollectionName"])
-    print("host_collection_pid = %s" % config["hostCollectionPid"])
-    print("datastreams = %s" % str(config["datastreams"]))
-    print("======================================================")
+    def printSettings(self):
+        print("======================================================")
+        print("=== Configuration data ===")
+        print("\n[Fedora]")
+        print("url = %s" % self.fedoraUrl)
+        print("namespace = %s" % self.fedoraNS)
+        print("username = %s" % self.fedoraUser)
+        print("password = %s" % self.fedoraPW)
+        print("host_collection_name = %s" % self.hostCollectionName)
+        print("host_collection_pid = %s" % self.hostCollectionPid)
+        print("aggregate_name = %s" % self.aggregateName)
+        print("aggregate_pid = %s" % self.aggregatePid)
+        print("\n[Solr]")
+        print("url = %s" % self.solrUrl)
+        print("\n[Controller]")
+        print("input_dir = %s" % self.inDir)
+        print("output_dir = %s" % self.outDir)
+        print("mail_to = %s" % self.mailTo)
+        print("datastreams = %s" % str(self.datastreams))
+        print("======================================================")

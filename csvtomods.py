@@ -38,6 +38,10 @@ def csv2mods(csvFilename, outDir=None):
                 mods.addName(value, type="corporate", role="Creator")
             elif "description" in k:
                 continue
+            elif "publisher" in k:
+                mods.addOrigiInfoPublisher(value)
+            elif "spatial" in k:
+                mods.addOriginInfoPlaceByName(value)
             elif "extentoriginal" in k:
                 continue
             elif "extent" in k:

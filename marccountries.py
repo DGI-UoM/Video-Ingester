@@ -340,7 +340,7 @@ def findCountryByCode(code):
 
 def findCodeByCountry(country):
     for k,v in countries.items():
-        if v == code:
+        if v == country:
             return k
 
 def findPair(key):
