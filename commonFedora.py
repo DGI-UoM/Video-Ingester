@@ -42,14 +42,7 @@ def addCollectionToFedora(fedora, myLabel, myPid, parentPid="islandora:top", con
     collection_object = fedora.createObject(myPid, label=myLabel)
 
     # collection policy
-    try:
-        collection_object.addDataStream(u'COLLECTION_POLICY', "collection_policy.xml", label=u'COLLECTION_POLICY',
-        mimeType=u'text/xml', controlGroup=u'X', # X=inline xml
-        logMessage=u'Added basic COLLECTION_POLICY data.')
-        print("Added COLLECTION_POLICY datastream to %s" % myPid)
-    except FedoraConnectionException, fcx:
-        print("Error adding COLLECTION_POLICY datastream to %s" % myPid)
-        raise fcx
+    fedoraLib.update_datastream(collection_object, u"COLLECTION_POLICY", "collection_policy.xml", label=u'COLLECTION_POLICY', mimeType=u'text/xml', controlGroup=u'X')
 
     #add relationships
     collection_object_RELS_EXT=fedora_relationships.rels_ext(collection_object, [fedora_relationships.rels_namespace('fedora-model', 'info:fedora/fedora-system:def/model#')])
