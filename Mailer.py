@@ -10,7 +10,7 @@ Created on Oct. 12 2011
 import subprocess
 
 def sendEmail(addrs, subject, message):
-    print("Sending email (%s) to addresses %s" % (subject, addrs))
+    print("Sending email (%s) to addresses: %s" % (subject, addrs))
     subprocess.Popen('echo "%s" | mailx -s "%s" %s' % (message, subject, addrs), shell=True, executable="/bin/bash")
 
     # cmd = echo "message" | mailx -s "subject" addresses
