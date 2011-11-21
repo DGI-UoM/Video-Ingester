@@ -6,13 +6,13 @@ Created on Oct. 12 2011
 @TODO: email integration:waiting on server
 """
 
-import os, sys
+import os, sys, pwd
 import ConfigParser
 
 class ConfigData:
-    def __init__(self):
+    def __init__(self, saveFile="IngesterState.save"):
         self.cfgFile = "controller.cfg"
-        self.saveFile = "IngesterState.save"
+        self.saveFile = saveFile
         self.fedoraUrl = None
         self.fedoraNS = None
         self.fedoraUser = None
@@ -20,10 +20,13 @@ class ConfigData:
         self.solrUrl = None
         self.inDir = None
         self.outDir = None # might not need this
+        self.outUrl = None
+        self.apacheUser = None
         self.hostCollectionName = None
         self.hostCollectionPid = None
         self.datastreams = []
-        self.files = {}
+        self.files = []
+        self.converters = {}
 
     def parse(self, configFile):
         self.cfgFile = configFile
@@ -46,50 +49,73 @@ class ConfigData:
             self.solrUrl = cfgp.get("Solr", "url")
             self.inDir = os.path.expanduser(cfgp.get("Controller", "input_dir"))
             self.outDir = os.path.expanduser(cfgp.get("Controller", "output_dir"))
+            self.outUrl = cfgp.get("Controller", "output_url")
             self.mailTo = cfgp.get("Controller", "mail_to").replace(",", " ")
             self.datastreams = cfgp.get("Controller", "datastreams").split(",")
             self.files = cfgp.options("Files")
+
         except ConfigParser.NoSectionError, nsx:
-            print "Error while parsing config file: %s" % nsx
+            print("Error while parsing config file: %s" % nsx)
             return False
         except ConfigParser.NoOptionError, nox:
-            print "Error while parsing config file: %s" % nox
+            print("Error while parsing config file: %s" % nox)
+            return False
+
+        try:
+            self.apacheUser = pwd.getpwnam(cfgp.get("Controller", "apache_user"))
+        except KeyError, kx:
+            print "Error trying to locate the given apache user (is it misspelled?)"
+            print "Permission updates will be skipped"
+            self.apacheUser = (None, None, None, None, None, None)
+
+        try:
+            for key1 in self.datastreams:
+                for key2 in self.datastreams:
+                    option = "%s2%s" % (key1, key2)
+                    if cfgp.has_option("Commands", option):
+                        self.converters[option] = cfgp.get("Commands", option)
+        except ConfigParser.NoOptionError, nox:
+            print("Error while parsing converter commands from config file")
             return False
         return True
 
-    def writeSaveHeader(self, saveFile):
-        fp = open(saveFile, "w")
-        # prep the config file for input
-        if sys.version_info >= (2, 7):
-            cfgp = ConfigParser.SafeConfigParser(allow_no_value=True)
-        else:
-            cfgp = ConfigParser.SafeConfigParser()
+    def writeSaveHeader(self):
+        fp = open(self.saveFile, "w")
 
-        cfgp.add_section("Fedora")
-        cfgp.set("Fedora", "url", self.fedoraUrl)
-        cfgp.set("Fedora", "namespace", self.fedoraNS)
-        cfgp.set("Fedora", "username", self.fedoraUser)
-        cfgp.set("Fedora", "password", self.fedoraPW)
-        cfgp.set("Fedora", "host_collection_name", self.hostCollectionName)
-        cfgp.set("Fedora", "host_collection_pid", self.hostCollectionPid)
-        cfgp.set("Fedora", "aggregate_name", self.aggregateName)
-        cfgp.set("Fedora", "aggregate_pid", self.aggregatePid)
-        cfgp.add_section("Solr")
-        cfgp.set("Solr", "url", self.solrUrl)
-        cfgp.add_section("Controller")
-        cfgp.set("Controller", "input_dir", self.inDir)
-        cfgp.set("Controller", "output_dir", self.outDir)
-        cfgp.set("Controller", "mail_to", self.mailTo.replace(" ", ","))
-        cfgp.set("Controller", "datastreams", ",".join(self.datastreams))
-        cfgp.add_section("Files")
+        fp.write("[Fedora]\n")
+        fp.write("url=%s\n" % self.fedoraUrl)
+        fp.write("namespace=%s\n" % self.fedoraNS)
+        fp.write("username=%s\n" % self.fedoraUser)
+        fp.write("password=%s\n" % self.fedoraPW)
+        fp.write("host_collection_name=%s\n" % self.hostCollectionName)
+        fp.write("host_collection_pid=%s\n" % self.hostCollectionPid)
+        fp.write("aggregate_name=%s\n" % self.aggregateName)
+        fp.write("aggregate_pid=%s\n" % self.aggregatePid)
+
+        fp.write("\n[Solr]\n")
+        fp.write("url=%s\n" % self.solrUrl)
+
+        fp.write("\n[Controller]\n")
+        fp.write("input_dir=%s\n" % self.inDir)
+        fp.write("output_dir=%s\n" % self.outDir)
+        fp.write("output_url=%s\n" % self.outUrl)
+        fp.write("apache_user=%s" % self.apacheUser[0])
+        fp.write("mail_to=%s\n" % self.mailTo.replace(" ", ","))
+        fp.write("datastreams=%s\n" % ",".join(self.datastreams))
+
+        fp.write("\n[Commands]\n")
+        for k, v in self.converters.iteritems():
+            fp.write("%s=%s\n" % (k, v.replace("%", "%%")))
+
+        fp.write("\n[Files]\n")
         # just the section header so no values(files) are written here
-        cfgp.write(fp)
+        fp.flush()
         fp.close()
 
     # write a record to the script save state
-    def writeSaveRecord(self, saveFile, record):
+    def writeSaveRecord(self, record):
         self.files.append(record)
-        file = open(saveFile, 'a')
+        file = open(self.saveFile, 'a')
         file.write(record + '\n')
         file.flush()
         file.close()
@@ -112,6 +138,26 @@ class ConfigData:
         print("\n[Controller]")
         print("input_dir = %s" % self.inDir)
         print("output_dir = %s" % self.outDir)
+        print("output_url = %s" % self.outUrl)
+        print("apache_user=%s" % self.apacheUser[0])
         print("mail_to = %s" % self.mailTo)
         print("datastreams = %s" % str(self.datastreams))
+        print("\n[Commands]")
+        for k, v in self.converters.iteritems():
+            print("%s = %s" % (k, v))
         print("======================================================")
+
+    def getConverterCommand(self, fr, to):
+        key = "%s2%s" % (fr, to)
+        if self.converters.has_key(key):
+            return self.converters[key]
+        return None
+
+    def fileIsComplete(self, file):
+        return file in self.files
+
+    def getApacheUid(self):
+        return self.apacheUser[2]
+
+    def getApacheGid(self):
+        return self.apacheUser[3]
