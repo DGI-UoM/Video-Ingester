@@ -4,5 +4,6 @@
 if [ $EUID -ne 0 ]; then
     echo "This script requires root access to run"
 else
-    python Ingester.py > >(tee stdout.log) 2>stderr.log
+    # pass script parameters to the python script
+    python Ingester.py $@ > >(tee stdout.log) 2>stderr.log
 fi
