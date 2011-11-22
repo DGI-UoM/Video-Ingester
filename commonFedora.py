@@ -29,8 +29,44 @@ def connectToFedora(url, user, pw):
 
 """ ====== MANAGING FEDORA OBJECTS ====== """
 
-def addCollectionToFedora(fedora, myLabel, myPid, parentPid="islandora:top", contentModel="islandora:collectionCModel"):
-    # put in the collection object
+def createRelsExt(childObject, parentPid, contentModel, tnUrl=None):
+    """
+    Create the RELS-EXT relationships between childObject and object:parentPid
+    We set the default namespace for our interconnections, then apply the content model, and make
+    childObject a member of the object:parentPid collection.  If object:parentPid doesn't have the
+    collection content model then hilarity could ensue...
+    """
+
+    #add relationships
+    rels_ext=fedora_relationships.rels_ext(childObject, fedora_relationships.rels_namespace('fedora-model', 'info:fedora/fedora-system:def/model#'))
+    rels_ext.addRelationship(fedora_relationships.rels_predicate('fedora-model', 'hasModel'), [contentModel, "pid"])
+    rels_ext.addRelationship('isMemberOfCollection', [parentPid, "pid"])
+    loop = True
+    while loop:
+        loop = False
+        try:
+            rels_ext.update()
+        except FedoraConnectionException as fedoraEXL:
+            if str(fedoraEXL.body).find("is currently being modified by another thread") != -1:
+                loop = True
+                print("Trouble (thread lock) updating obj(%s) RELS-EXT - retrying." % childObject.pid)
+            else:
+                print("Error updating obj(%s) RELS-EXT" % childObject.pid)
+    return rels_ext
+
+def addCollectionToFedora(fedora, myLabel, myPid, parentPid="islandora:top", contentModel="islandora:collectionCModel", tnUrl=None):
+    """
+    Add a collection (not an object) to fedora
+    @param fedora The fedora instance to add the collection to
+    @param myLabel The label to apply to the collection object object
+    @param myPid The pid of the collection to try and create, if the pid is already a valid object/collection, then return that object instead
+    @parentPid [optional] The parent object to nest this one under
+    @contentModel [optional] The content model to attach to this collection object
+    @tnUrl [optional] The url of an image to use as the thumbnail
+    """
+
+    print("Attempt to create collection '%s' with pid=%s" % (myLabel, myPid))
+    # validate the pid
     try:
         collection_object = fedora.getObject(myPid)
         print("Attempted to create already existing collection %s" % myPid)
@@ -41,80 +77,55 @@ def addCollectionToFedora(fedora, myLabel, myPid, parentPid="islandora:top", con
 
     collection_object = fedora.createObject(myPid, label=myLabel)
 
+    # this is the biggest difference between objects and collections - a collection policy
     # collection policy
     fedoraLib.update_datastream(collection_object, u"COLLECTION_POLICY", "collection_policy.xml", label=u'COLLECTION_POLICY', mimeType=u'text/xml', controlGroup=u'X')
 
-    #add relationships
-    collection_object_RELS_EXT=fedora_relationships.rels_ext(collection_object, [fedora_relationships.rels_namespace('fedora-model', 'info:fedora/fedora-system:def/model#')])
-    collection_object_RELS_EXT.addRelationship(fedora_relationships.rels_predicate('fedora-model', 'hasModel'), contentModel)
-    collection_object_RELS_EXT.addRelationship('isMemberOfCollection', parentPid)
-    loop = True
-    while loop:
-        loop = False
-        try:
-            collection_object_RELS_EXT.update()
-        except FedoraConnectionException as fedoraEXL:
-            if str(fedoraEXL.body).find("is currently being modified by another thread") != -1:
-                loop = True
-                print("Trouble (thread lock) updating obj(%s) RELS-EXT - retrying." % myPid)
-            else:
-                print("Error updating obj(%s) RELS-EXT" % myPid)
+    # thumnail, if one is supplied
+    if tnUrl:
+        # possibly check if tnUrl is a valid jpg
+        #add a TN datastream to the object after creating it from the book cover
+        fedoraLib.update_datastream(collection_object, 'TN', tnUrl, label=myLabel+'_TN.jpg', mimeType='image/jpeg')
+
+    # rels-ext relations
+    collection_relsext = createRelsExt(collection_object, parentPid, contentModel)
+
     return collection_object
 
-def addObjectToFedora(fedora, myLabel, myPid, parentPid, contentModel):
+def addObjectToFedora(fedora, myLabel, myPid, parentPid, contentModel, tnUrl=None):
+    """
+    Add an object (not a collection) to fedora
+    @param fedora The fedora instance to add the object to
+    @param myLabel The label to apply to the object object
+    @param myPid The pid of the object to try and create, if the pid is already a valid object/collection, then return that object instead
+    @parentPid [optional] The parent object to nest this one under
+    @contentModel [optional] The content model to attach to this object
+    @tnUrl [optional] The url of an image to use as the thumbnail
+    """
     # check for invalid parentPid, invalid contentModel
-    # create the fedora object
+
+    print("Attempt to create object '%s' with pid=%s" % (myLabel, myPid))
     # validate the pid
     try:
+        # try to create the fedora object
         obj = fedora.getObject(myPid)
         print("Attempted to create already existing object %s" % myPid)
         return obj
     except FedoraConnectionException, fcx:
         if fcx.httpcode not in [404]:
+            # this will throw a bunch of exceptions - all of them to the tune of "cannot connect to fedora"
             raise fcx
 
-    print("Fedora object %s does not exit - create it" % myPid)
-    #myLabel = unicode(os.path.basename(os.path.dirname(modsFilePath)))
     obj = fedora.createObject(myPid, label=myLabel)
 
-    #configure rels ext
-    objRelsExt = fedora_relationships.rels_ext(obj, fedora_relationships.rels_namespace("fedora-model", "info:fedora/fedora-system:def/model#"))
-    objRelsExt.addRelationship(fedora_relationships.rels_predicate("fedora-model", "hasModel"), contentModel)
-    objRelsExt.addRelationship("isMemberOfCollection", parentPid)
+    # thumbnail, if one is supplied
+    if tnUrl:
+        # possibly check if tnUrl is a valid jpg
+        #add a TN datastream to the object after creating it from the book cover
+        fedoraLib.update_datastream(obj, 'TN', tnUrl, label=myLabel+'_TN.jpg', mimeType='image/jpeg')
 
-    loop = True
-    while loop:
-        loop = False
-        try:
-            objRelsExt.update()
-        except FedoraConnectionException as fedoraEXL:
-            if str(fedoraEXL.body).find("is currently being modified by another thread") != -1:
-                loop = True
-                print("Trouble (thread lock) updating obj(%s) RELS-EXT - retrying." % myPid)
-            else:
-                print("Error updating obj(%s) RELS-EXT" % myPid)
+    # rels-ext relations
+    obj_relsext = createRelsExt(obj, parentPid, contentModel)
 
-    """
-    #add the book pid to modsFile
-    parser = etree.XMLParser(remove_blank_text=True)
-    xmlFile = etree.parse(modsFilePath, parser)
-    xmlFileRoot = xmlFile.getroot()
-    modsElem = etree.Element("{http://www.loc.gov/mods/v3}identifier", type="pid")
-    modsElem.text = bookPid
-    xmlFileRoot.append(modsElem)
-    xmlFile.write(modsFilePath)
-
-    #add mods datastream
-    obj.update_datastream('MODS', modsFilePath, label=modsFilePath, mimeType='text/xml', controlGroupl='X')
-
-    #add a TN datastream to the object after creating it from the book cover
-    tnPath = os.path.join(os.path.dirname(modsFilePath), (myLabel + '_TN.jpg'))
-    converter.tif_to_jpg(os.path.join(os.path.dirname(modsFilePath), '0001_a_front_cover.tif'), tnPath, 'TN')
-    tnUrl = open(tnPath)
-    obj.update_datastream('TN', tnPath, label=myLabel+'_TN.jpg', mimeType='image/jpeg')
-
-    #index the object in solr
-    sendToSolr()
-    """
     return obj
 
