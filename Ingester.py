@@ -9,7 +9,7 @@ Created on Oct. 12 2011
 """
 
 # system imports
-import sys, os, time, signal, subprocess
+import sys, os, time, signal, subprocess, atexit
 import shutil
 from lxml import etree
 from optparse import OptionParser
@@ -25,6 +25,7 @@ DRYRUN = False
 
 GENERATE_ME = "*"
 config = ConfigData()
+message = Mailer.EmailMessage()
 
 # these are the options to the ffmpeg call for the target output format
 # use "ffmpeg -i %s %s %s" % (input_file, ffmpeg_switches[target_format], target_file)
@@ -34,7 +35,7 @@ ffmpeg_switches = {
     "mp3" : "-acodec libmp3lame -ab 256k",
     "ogg" : "-acodec libvorbis -aq 60",
     "aac" : "-acodec libfaac",
-    "ac3" : "-acodec ac3 audio.mp3",
+    "ac3" : "-acodec ac3",
     "wav" : "",
     "mp4" : "-f mp4 -vcodec copy -acodec copy"
 }
@@ -50,11 +51,10 @@ def processModsFolder(fedora, folder, dsFolders):
     if not os.path.isdir(folder):
         return 0
 
-    print("Create aggregate object %s with pid=%s" % (config.aggregateName, config.aggregatePid))
+    coll = addCollectionToFedora(fedora, config.aggregateName, config.aggregatePid, parentPid=config.hostCollectionPid)
+    #add a TN datastream to the aggregate
+    tnPath = os.path.join(config.inDir, "collection_TN.jpg")
     if not DRYRUN:
-        coll = addCollectionToFedora(fedora, config.aggregateName, config.aggregatePid, parentPid=config.hostCollectionPid)
-        #add a TN datastream to the aggregate
-        tnPath = os.path.join(config.inDir, "collection_TN.jpg")
         fedoraLib.update_datastream(coll, "TN", tnPath, label=unicode(config.aggregateName+"_TN.jpg"), mimeType=misc.getMimeType("jpg"))
 
     print("Prepare destination for file copy")
@@ -62,9 +62,9 @@ def processModsFolder(fedora, folder, dsFolders):
         dsDir = os.path.join(config.outDir, k)
         if not os.path.isdir(dsDir):
             os.makedirs(dsDir, 0755) # makedirs is a more extensive version of mkdir - it will create the entire tree if neccessary
-            user = config.getApacheUid()
+            user = config.getTargetUid()
             if user:
-                os.chown(dsDir, user, config.getApacheGid())
+                os.chown(dsDir, user, config.getTargetGid())
 
     # the keys from dsFolders tells me what types of files are being ingested
     cmodel = ""
@@ -108,25 +108,32 @@ def processModsFolder(fedora, folder, dsFolders):
         # find the "master datastream" - the one to generate all missing ones from
         # the master is the first one in the list that exists
         #print dsFolders
+        dsFileBase = os.path.splitext(mod)[0]
         masterDS = ""
         for k,v in dsFolders.iteritems():
-            filename = os.path.splitext(mod)[0] + os.extsep + k
+            filename = dsFileBase + os.extsep + k
             if os.path.isfile(os.path.join(v, filename)) and v != GENERATE_ME:
                 masterDS = k
                 print("Set master datastream = %s (%s)" % (masterDS, dsFolders[masterDS]))
                 break;
-        # now we know what file to use as a master generator, but what function?
+        if masterDS == "":
+            # could not find master datastream
+            print("Could not find master datastream")
+            message.addLine("Ingesting object %s, masterDS not found" % dsFileBase)
+            continue
+        else:
+            message.addLine("Ingesting object %s, masterDS = %s" % (dsFileBase, dsFolders[masterDS]))
 
         # loop through dsFolders and search for more objects to datastreamify
         print("Scan for additional datastreams...")
         for k, v in dsFolders.iteritems():
-            dsFileBase = os.path.splitext(mod)[0]
             dsFile = dsFileBase + os.extsep + k
             path = os.path.join(v, dsFile)
             target = ""
-            print("Check file %s" % path)
+            print("Check file: %s" % path)
             if config.fileIsComplete(path):
-                print("Config settings report that file (%s) is already complete" % path)
+                print("Config settings report that file is already complete")
+                continue
             if not os.path.isfile(path):#v == GENERATE_ME:
                 masterFileName = dsFileBase + os.extsep + masterDS
                 masterFile = os.path.join(dsFolders[masterDS], masterFileName)
@@ -138,7 +145,7 @@ def processModsFolder(fedora, folder, dsFolders):
                     cmd = cmd % (masterFile, target)
                     print "Using user supplied command: %s" % cmd
                 else:
-                    cmd = "ffmpeg -i %s %s %s" % (masterFile, ffmpeg_switches[k], target)
+                    cmd = "ffmpeg -i '%s' %s '%s'" % (masterFile, ffmpeg_switches[k], target)
                     print "Using fallback command: %s" % cmd
                 if DRYRUN:
                     print("Generate file %s from master %s using cmd=[%s]" % (target, masterFile, cmd))
@@ -147,13 +154,15 @@ def processModsFolder(fedora, folder, dsFolders):
                     # using shell=True can cause security problems here, if one of the files
                     # contains some malicious code as part of its filename, things will go sour
                     # really fast
-                    if ";" in cmd:
+                    if "'" in masterFile or "'" in target:
                         print("ERROR - one of the ingest operations is about to cause a problem:")
-                        print("Command: '%s'" % cmd)
+                        print("Command: <%s>" % cmd)
                         print("Please sanitize your file names and paths")
-                        Mailer.sendEmail(config.mailTo, "Error - malformed ingest command detected: %s\nPossibly malicious code" % cmd, "Critical Ingest error")
+                        message.addLine("Critical ingest error")
+                        message.addLine("Possibly malformed ingest command detected: %s\nMight be malicious code" % cmd)
                         return -1
                     else:
+                        message.addLine("Converting file %s to create %s" % (masterFile, target))
                         subprocess.call(cmd, shell=True)
                 # we're not going to record this file operation in the save file since the source
                 # file was generated and not supplied
@@ -165,17 +174,13 @@ def processModsFolder(fedora, folder, dsFolders):
                         print("cp %s %s" % (path, target))
                     else:
                         print("Copy file %s into place" % path)
-                        try:
-                            shutil.copy(path, os.path.split(target)[0])
-                        except:
-                            pdb.set_trace()
-                # we *do* record this file operation since this file is finished processing
-                config.writeSaveRecord(path)
+                        message.addLine("Copying file %s to %s" % (path, target))
+                        shutil.copy(path, os.path.split(target)[0])
             if os.path.exists(target):
                 print("Ingest file...")
-                user = config.getApacheUid()
+                user = config.getTargetUid()
                 if user:
-                    os.chown(target, user, config.getApacheGid())
+                    os.chown(target, user, config.getTargetGid())
                 os.chmod(target, 0755)
                 if not DRYRUN:
                     fedoraLib.update_datastream(obj, k.upper(), target.replace(config.outDir, config.outUrl), label=dsFile, mimeType=misc.getMimeType(k), controlGroup='R')
@@ -186,16 +191,17 @@ def processModsFolder(fedora, folder, dsFolders):
 def shutdown_handler(signum, frame):
     # is there enough time to save the script state, do we even have to?
     print("Script terminating with signal %d" % signum)
-    Mailer.sendEmail(config.mailTo, "Script was terminated with signal %d" % signum, "Ingester Error")
+    if config.mailTo:
+        Mailer.sendEmail(config.mailTo, "Script was terminated with signal %d" % signum, "Ingester Error")
     sys.exit(1)
+
+def sendReport():
+    message.send()
+    print("Email report sent")
 
 """ ====== M A I N ====== """
 def main(argv):
-    if DRYRUN:
-        print("Launch Ingester in SKELETON mode...")
-    else:
-        print("Launch Ingester...")
-    print("argv=%s" % str(argv))
+    global DRYRUN
 
     # register handlers so we properly disconnect and reconnect
     signal.signal(signal.SIGINT, shutdown_handler)
@@ -205,7 +211,16 @@ def main(argv):
     optionp = OptionParser()
     optionp.add_option("-c", "--config-file", type="string", dest="configfile", default=config.cfgFile, help="Path of the configuration file.")
     optionp.add_option("-i", "--ignore-save", action="store_true", dest="ignore", default=False, help="Ignore saved script state files when launching.")
+    optionp.add_option("-d", "--dry-run", action="store_true", dest="dryrun", default=False, help="Perform a dry run of the script: make folders, but don't move/convert files, and don't create any fedora objects.")
     (options, args) = optionp.parse_args()
+
+    DRYRUN = options.dryrun
+
+    if DRYRUN:
+        print("Launch Ingester in SKELETON mode...")
+    else:
+        print("Launch Ingester...")
+    print("argv=%s" % str(argv))
 
     if not os.path.exists(options.configfile):
         print("Config file %s not found!" % (options.configfile))
@@ -236,10 +251,14 @@ def main(argv):
     # if we are forcing a new run, or we can't find the requested save file
     newRun = options.ignore or (not os.path.isfile(config.saveFile))
     if newRun:
-        if os.path.isdir(config.outDir):
-            print("Creating new configuration save state in file %s" % config.saveFile)
-            # create new script state
-            config.writeSaveHeader()
+        if not os.path.isdir(config.outDir):
+            os.makedirs(config.outDir, 0755)
+            user = config.getTargetUid()
+            if user:
+                os.chown(config.outDir, user, config.getTargetGid())
+        print("Creating new configuration save state in file %s" % config.saveFile)
+        # create new script state
+        config.writeSaveHeader()
     else:
         # setup a resume of operations
         print("Loading configuration from file %s" % config.saveFile)
@@ -256,17 +275,25 @@ def main(argv):
         if not os.path.isdir(config.outDir):
             print("Output directory does not exist - creating directory %s" % config.outDir)
             os.makedirs(config.outDir, 0755)
-            user = config.getApacheUid()
+            user = config.getTargetUid()
             if user:
-                os.chown(outDir, user, config.getApacheGid())
+                os.chown(config.outDir, user, config.getTargetGid())
             print("Creating new configuration save state in file")
             config.writeSaveHeader()
 
+    for addr in config.mailTo.split(" "):
+        message.addAddress(addr)
+    message.setSubject("%s report" % argv[0])
+    atexit.register(sendReport)
+
+    if DRYRUN:
+        message.addLine("Running in SKELETON mode")
+
     """ ====== ENVIRONMENT VARIABLES ====== """
     # add cli,imageMagick to the path and hope for the best [remove these on production server]
-    os.environ["PATH"] = os.environ["PATH"] + ":/usr/local/ABBYY/FREngine-Linux-i686-9.0.0.126675/Samples/Samples/CommandLineInterface"
-    os.environ["PATH"] = os.environ["PATH"] + ":/usr/local/Linux-x86-64"
-    os.environ["PATH"] = os.environ["PATH"] + ":/usr/local/Exif"
+    #os.environ["PATH"] = os.environ["PATH"] + ":/usr/local/ABBYY/FREngine-Linux-i686-9.0.0.126675/Samples/Samples/CommandLineInterface"
+    #os.environ["PATH"] = os.environ["PATH"] + ":/usr/local/Linux-x86-64"
+    #os.environ["PATH"] = os.environ["PATH"] + ":/usr/local/Exif"
     # not sure about this - syn doesn't have convert in this path
     convertPath = "/usr/local/bin"
     if not os.environ["PATH"].startswith(convertPath):
@@ -280,6 +307,7 @@ def main(argv):
     fedora = connectToFedora(config.fedoraUrl, config.fedoraUser, config.fedoraPW)
     if not fedora:
         print("Error connecting to fedora instance at %s" % config.fedoraUrl)
+        message.addLine("Error connecting to fedora instance at %s" % config.fedoraUrl)
         return 5
 
     print("Try to create host collection object (pid=%s)" % config.hostCollectionPid)
@@ -317,8 +345,11 @@ def main(argv):
             modsDir = os.path.join(config.outDir, "mods")
             if not os.path.isdir(modsDir):
                 os.makedirs(modsDir, 0755) # makedirs is a more extensive version of mkdir - it will create the entire tree if neccessary
-                os.chown(modsDir, config.getApacheUid(), config.getApacheGid())
-            csv2mods(os.path.join(config.inDir, file), modsDir)
+                os.chown(modsDir, config.getTargetUid(), config.getTargetGid())
+            try:
+                csv2mods(os.path.join(config.inDir, file), modsDir)
+            except:
+                print("Failed to run csv2mods - skipping")
             foundIndex = True
             continue
         else:
@@ -334,7 +365,7 @@ def main(argv):
 
     if numFiles < 0:
         return nunmFiles
-    Mailer.sendEmail(config.mailTo, "Script run complete: %d files ingested" % numFiles, "Ingester Info")
+    message.addLine("Script run complete: %d files ingested" % numFiles)
     return 0
 
 if __name__ == "__main__":
