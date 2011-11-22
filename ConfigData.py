@@ -21,11 +21,10 @@ class ConfigData:
         self.inDir = None
         self.outDir = None # might not need this
         self.outUrl = None
-        self.apacheUser = None
+        self.targetUser = None
         self.hostCollectionName = None
         self.hostCollectionPid = None
         self.datastreams = []
-        self.files = []
         self.converters = {}
 
     def parse(self, configFile):
@@ -52,7 +51,6 @@ class ConfigData:
             self.outUrl = cfgp.get("Controller", "output_url")
             self.mailTo = cfgp.get("Controller", "mail_to").replace(",", " ")
             self.datastreams = cfgp.get("Controller", "datastreams").split(",")
-            self.files = cfgp.options("Files")
 
         except ConfigParser.NoSectionError, nsx:
             print("Error while parsing config file: %s" % nsx)
@@ -62,11 +60,11 @@ class ConfigData:
             return False
 
         try:
-            self.apacheUser = pwd.getpwnam(cfgp.get("Controller", "apache_user"))
+            self.targetUser = pwd.getpwnam(cfgp.get("Controller", "target_user"))
         except KeyError, kx:
-            print "Error trying to locate the given apache user (is it misspelled?)"
+            print "Error trying to locate the given target user (is it misspelled?)"
             print "Permission updates will be skipped"
-            self.apacheUser = (None, None, None, None, None, None)
+            self.targetUser = ("", None, None, None, None, None)
 
         try:
             for key1 in self.datastreams:
@@ -99,7 +97,7 @@ class ConfigData:
         fp.write("input_dir=%s\n" % self.inDir)
         fp.write("output_dir=%s\n" % self.outDir)
         fp.write("output_url=%s\n" % self.outUrl)
-        fp.write("apache_user=%s" % self.apacheUser[0])
+        fp.write("target_user=%s\n" % self.targetUser[0])
         fp.write("mail_to=%s\n" % self.mailTo.replace(" ", ","))
         fp.write("datastreams=%s\n" % ",".join(self.datastreams))
 
@@ -107,19 +105,8 @@ class ConfigData:
         for k, v in self.converters.iteritems():
             fp.write("%s=%s\n" % (k, v.replace("%", "%%")))
 
-        fp.write("\n[Files]\n")
-        # just the section header so no values(files) are written here
         fp.flush()
         fp.close()
-
-    # write a record to the script save state
-    def writeSaveRecord(self, record):
-        self.files.append(record)
-        file = open(self.saveFile, 'a')
-        file.write(record + '\n')
-        file.flush()
-        file.close()
-        # close after every write so if the script stops (for any reason), the save state will be intact
 
     def printSettings(self):
         print("======================================================")
@@ -139,7 +126,7 @@ class ConfigData:
         print("input_dir = %s" % self.inDir)
         print("output_dir = %s" % self.outDir)
         print("output_url = %s" % self.outUrl)
-        print("apache_user=%s" % self.apacheUser[0])
+        print("target_user=%s" % self.targetUser[0])
         print("mail_to = %s" % self.mailTo)
         print("datastreams = %s" % str(self.datastreams))
         print("\n[Commands]")
@@ -154,10 +141,10 @@ class ConfigData:
         return None
 
     def fileIsComplete(self, file):
-        return file in self.files
+        return os.path.isfile(file.replace(self.inDir, self.outDir))
 
-    def getApacheUid(self):
-        return self.apacheUser[2]
+    def getTargetUid(self):
+        return self.targetUser[2]
 
-    def getApacheGid(self):
-        return self.apacheUser[3]
+    def getTargetGid(self):
+        return self.targetUser[3]
