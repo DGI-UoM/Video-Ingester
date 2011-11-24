@@ -58,8 +58,10 @@ def csv2mods(csvFilename, outDir=None):
             elif "language" in k:
                 mods.addLanguageByName(value)
 
-        with open(fileName, "wb") as file:
-            mods.writeToFile(file)
+        file = open(fileName, "wb")
+        mods.writeToFile(file)
+        file.flush()
+        file.close()
 
 def main(argv):
     csv2mods("metadata_Anderson.csv")
