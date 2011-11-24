@@ -46,7 +46,7 @@ def createRelsExt(childObject, parentPid, contentModel, tnUrl=None):
         loop = False
         try:
             rels_ext.update()
-        except FedoraConnectionException as fedoraEXL:
+        except FedoraConnectionException, fedoraEXL:
             if str(fedoraEXL.body).find("is currently being modified by another thread") != -1:
                 loop = True
                 print("Trouble (thread lock) updating obj(%s) RELS-EXT - retrying." % childObject.pid)
@@ -129,3 +129,23 @@ def addObjectToFedora(fedora, myLabel, myPid, parentPid, contentModel, tnUrl=Non
 
     return obj
 
+# this function is taken from the old book converter
+def sendSolr():
+    '''
+    This is a helper function that creates and sends information to solr for ingest
+    '''
+
+    """
+    solrFile = os.path.join(os.path.dirname(config["modsFilePath"]), 'mods_book_solr.xml')
+    converter.mods_to_solr(config["modsFilePath"], solrFile)
+    solrFileHandle = open(solrFile, 'r')
+    solrFileContent = solrFileHandle.read()
+    solrFileContent = solrFileContent[solrFileContent.index('\n'):]
+    curlCall = 'curl ' + config.solrUrl + '/update?commit=true' + r" -H 'Content-Type: text/xml' --data-binary '" + solrFileContent + r"'"
+    # I don't think thise r's are needed here --------------------^-------------------------------------------------------------------^
+    r = subprocess.call(curlCall, shell=True)
+    if r != 0:
+        logging.error('Trouble currling with Solr power. Curl returned code: ' + str(r))
+    solrFileHandle.close()
+    """
+    return True
