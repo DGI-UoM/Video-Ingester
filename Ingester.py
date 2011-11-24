@@ -3,7 +3,6 @@
 Created on Oct. 12 2011
 
 @author: Jason MacWilliams
-@dependencies: lxml
 
 @TODO: email integration:waiting on server
 """
@@ -11,7 +10,6 @@ Created on Oct. 12 2011
 # system imports
 import sys, os, time, signal, subprocess, atexit
 import shutil
-from lxml import etree
 from optparse import OptionParser
 # islandora imports
 from csvtomods import csv2mods
@@ -345,7 +343,9 @@ def main(argv):
             modsDir = os.path.join(config.outDir, "mods")
             if not os.path.isdir(modsDir):
                 os.makedirs(modsDir, 0755) # makedirs is a more extensive version of mkdir - it will create the entire tree if neccessary
-                os.chown(modsDir, config.getTargetUid(), config.getTargetGid())
+                user = config.getTargetUid()
+                if user:
+                    os.chown(modsDir, user, config.getTargetGid())
             try:
                 csv2mods(os.path.join(config.inDir, file), modsDir)
             except:
