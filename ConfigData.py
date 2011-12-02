@@ -2,8 +2,6 @@
 Created on Oct. 12 2011
 
 @author: Jason MacWilliams
-
-@TODO: email integration:waiting on server
 """
 
 import os, sys, pwd
@@ -30,10 +28,7 @@ class ConfigData:
     def parse(self, configFile):
         self.cfgFile = configFile
         # prep the config file for input
-        if sys.version_info >= (2, 7):
-            cfgp = ConfigParser.SafeConfigParser(allow_no_value=True)
-        else:
-            cfgp = ConfigParser.SafeConfigParser()
+        cfgp = ConfigParser.SafeConfigParser()
         cfgp.read(configFile)
 
         try:
@@ -79,32 +74,33 @@ class ConfigData:
 
     def writeSaveHeader(self):
         fp = open(self.saveFile, "w")
+        # prep the config file for output
+        cfgp = ConfigParser.SafeConfigParser()
 
-        fp.write("[Fedora]\n")
-        fp.write("url=%s\n" % self.fedoraUrl)
-        fp.write("namespace=%s\n" % self.fedoraNS)
-        fp.write("username=%s\n" % self.fedoraUser)
-        fp.write("password=%s\n" % self.fedoraPW)
-        fp.write("host_collection_name=%s\n" % self.hostCollectionName)
-        fp.write("host_collection_pid=%s\n" % self.hostCollectionPid)
-        fp.write("aggregate_name=%s\n" % self.aggregateName)
-        fp.write("aggregate_pid=%s\n" % self.aggregatePid)
+        cfgp.add_section("Fedora")
+        cfgp.set("Fedora", "url", self.fedoraUrl)
+        cfgp.set("Fedora", "namespace", self.fedoraNS)
+        cfgp.set("Fedora", "username", self.fedoraUser)
+        cfgp.set("Fedora", "password", self.fedoraPW)
+        cfgp.set("Fedora", "host_collection_name", self.hostCollectionName)
+        cfgp.set("Fedora", "host_collection_pid", self.hostCollectionPid)
+        cfgp.set("Fedora", "aggregate_name", self.aggregateName)
+        cfgp.set("Fedora", "aggregate_pid", self.aggregatePid)
+        cfgp.add_section("Solr")
+        cfgp.set("Solr", "url", self.solrUrl)
+        cfgp.add_section("Controller")
+        cfgp.set("Controller", "input_dir", self.inDir)
+        cfgp.set("Controller", "output_dir", self.outDir)
+        cfgp.set("Controller", "output_url",  self.outUrl)
+        cfgp.set("Controller", "target_user", self.targetUser[0])
+        cfgp.set("Controller", "mail_to", self.mailTo.replace(" ", ","))
+        cfgp.set("Controller", "datastreams", ",".join(self.datastreams))
 
-        fp.write("\n[Solr]\n")
-        fp.write("url=%s\n" % self.solrUrl)
-
-        fp.write("\n[Controller]\n")
-        fp.write("input_dir=%s\n" % self.inDir)
-        fp.write("output_dir=%s\n" % self.outDir)
-        fp.write("output_url=%s\n" % self.outUrl)
-        fp.write("target_user=%s\n" % self.targetUser[0])
-        fp.write("mail_to=%s\n" % self.mailTo.replace(" ", ","))
-        fp.write("datastreams=%s\n" % ",".join(self.datastreams))
-
-        fp.write("\n[Commands]\n")
+        cfgp.add_section("Commands")
         for k, v in self.converters.iteritems():
-            fp.write("%s=%s\n" % (k, v.replace("%", "%%")))
+            cfgp.set("Commands", k, v.replace("%", "%%"))
 
+        cfgp.write(fp)
         fp.flush()
         fp.close()
 
