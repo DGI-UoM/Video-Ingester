@@ -3,15 +3,10 @@
 Created on Oct. 12 2011
 
 @author: Jason MacWilliams
-
-@TODO: email integration:waiting on server
 """
 
-# system imports
 import sys, os, time, signal, subprocess, atexit
-import shutil
 from optparse import OptionParser
-# islandora imports
 from csvtomods import csv2mods
 import pdb
 
@@ -191,6 +186,8 @@ def shutdown_handler(signum, frame):
     print("Script terminating with signal %d" % signum)
     if config.mailTo:
         Mailer.sendEmail(config.mailTo, "Script was terminated with signal %d" % signum, "Ingester Error")
+    # we might also have to remove the last object as it may be corrupt
+    # need to look into how an interrupt can interfere with shutil.copy, os.chown, and ffmpeg
     sys.exit(1)
 
 def sendReport():
@@ -362,6 +359,9 @@ def main(argv):
         print("+-Performing ingest")
         # now os.path.join(outDir, "mods") contains my mods files
         numFiles = processModsFolder(fedora, os.path.join(config.outDir, "mods"), dsfolders)
+    else:
+        print("+-Index not found - terminating")
+        return 6
 
     if numFiles < 0:
         return nunmFiles
